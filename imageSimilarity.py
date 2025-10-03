@@ -103,7 +103,7 @@ if __name__ == "__main__":
 
     ap = ArgumentParser()
     ap.add_argument(
-        '--video', type=str, default="ForLearning_2025.mp4")
+        '--video', type=str, default="../ForLearning_2025.mp4")
     ap.add_argument('--limit', type=int, default=3)
 
     args = ap.parse_args()
