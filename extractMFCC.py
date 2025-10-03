@@ -19,12 +19,16 @@ import ipdb
 import warnings
 warnings.filterwarnings('ignore')
 
-NBFINALCOMBS = 3
+NBFINALCOMBS = 6
 MAXNBSTEPS = 10
 
 SAMPLINGRATE = 44100
-SEED = 13114324
+SEED = 1334
 np.random.seed(SEED)
+
+
+# from joblib import delayed, Parallel
+# from joblib import dump, load
 
 
 def compute_mfcc(y, sr):
@@ -117,8 +121,8 @@ def computeFeaturesFromCombinations(combinations, verbose=False):
 
 if __name__ == "__main__":
 
-    limit = -1
-    audio_folder = "/home/jimena/work/dev/ARTEX/labeled"
+    folder_name = 'renamed'
+    audio_folder = f"/home/jimena/work/dev/ARTEX/{folder_name}"
     output_folder = "audio/features"
     os.makedirs(output_folder, exist_ok=True)
 
@@ -130,26 +134,26 @@ if __name__ == "__main__":
 
     print(f"Extracting audio features from samples in {audio_folder}")
 
-    samples = glob(os.path.join(audio_folder, '*.wav'))[:limit]
+    samples = glob(os.path.join(audio_folder, '*.wav'))
     nb_samples = len(samples)
     print(f"Found {nb_samples} samples at {audio_folder}")
     # testDistenceMatrices(samples)
 
     flutes = {f"flute {k}": [] for k in range(6)}
     for sample in samples:
-        label = sample.split('labeled/')[1][:7]
+        label = f"flute {sample[-6]}"
         if label in flutes:
             flutes[label].append(sample)
 
     for f in flutes:
         print(f"Found {len(flutes[f])} audio samples for {f}")
-        flutes[f] = flutes[f][:10]
+        flutes[f] = flutes[f]
 
     combinations = [_ for _ in itertools.product(*['0123456789',]*6)]
 
     ###############
     # for dev
-    combinations = combinations[:1000]
+    # combinations = combinations[:1000]
     ###############
 
     nb_combs = len(combinations)
@@ -171,6 +175,7 @@ if __name__ == "__main__":
     aux_distance = getAuxDistanceMatrix(indexes)
     min_combs_dict = aux_distance.min()
     print(f"Current indexes are {indexes}")
+    print(f"Current samples are {[combinations[idx] for idx in indexes]}")
     print(f"Current min distance is {min_combs_dict}")
 
     eject_a, eject_b = np.unravel_index(aux_distance.argmin(), aux_distance.shape)
