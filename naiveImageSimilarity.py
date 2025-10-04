@@ -19,19 +19,11 @@ from scipy.stats import wasserstein_distance
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-##
-# Globals
-##
-
 warnings.filterwarnings('ignore')
 
 # specify resized image sizes
 height = 2**10
 width = 2**10
-
-##
-# Functions
-##
 
 def get_img(path, norm_size=False, norm_exposure=False):
   '''
