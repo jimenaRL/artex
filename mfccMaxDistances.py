@@ -7,6 +7,7 @@ import concurrent.futures
 from itertools import combinations
 from glob import glob
 from copy import deepcopy
+from argparse import ArgumentParser
 
 import librosa
 import numpy as np
@@ -19,17 +20,17 @@ import ipdb
 import warnings
 warnings.filterwarnings('ignore')
 
-NBFINALCOMBS = 6
-MAXNBSTEPS = 10
+DEFAULTNBFINALCOMBS = 60
+DEFAULTMAXNBSTEPS = 500
+DEFAULTAUDIOFOLDER = f"/home/jimena/work/dev/ARTEX/renamed"
+DEFAULTRESULTSFOLDER = f"/home/jimena/work/dev/ARTEX/results"
+
+DEFAULTSEED = 1334
 
 SAMPLINGRATE = 44100
-SEED = 1334
-np.random.seed(SEED)
-
 
 # from joblib import delayed, Parallel
 # from joblib import dump, load
-
 
 def compute_mfcc(y, sr):
     S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
@@ -78,7 +79,7 @@ def getMeanDescriptors(comb):
     S, mfcc = compute_mfcc(y, sr=44100)
     return S, mfcc
 
-def testDistenceMatrices(samples):
+def showSamplesDistanceMatrix(samples):
     # launch multiple threads computing distances and collect results
     start = time.time()
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -96,13 +97,13 @@ def testDistenceMatrices(samples):
     annot = True if nb_samples <= 10 else False
     heatmap = sns.heatmap(distances_mfcc, annot=annot, cmap='YlGnBu', linewidths=0.001, ax=ax)
     heatmap.set_title('mfcc')
-    heatmap.get_figure().savefig(os.path.join(output_folder, f"distances_mfcc.png"))
+    heatmap.get_figure().savefig(f"distances_mfcc.png")
 
     fig, ax = plt.subplots(figsize=(10,10))
     annot = True if nb_samples <= 10 else False
     heatmap = sns.heatmap(distances_mel, annot=annot, cmap='YlGnBu', linewidths=0.001, ax=ax)
     heatmap.set_title('mel')
-    heatmap.get_figure().savefig(os.path.join(output_folder, f"distances_mel.png"))
+    heatmap.get_figure().savefig(f"distances_mel.png")
 
 def computeFeaturesFromCombinations(combinations, verbose=False):
     start = time.time()
@@ -119,25 +120,36 @@ def computeFeaturesFromCombinations(combinations, verbose=False):
         print(f"Calculing 1000000 should take took {estimation / 3600} hours.")
     return mel_list, mfcc_list
 
+def getAuxDistanceMatrix(indexes, nbcombs):
+    combs = [combinations[idx] for idx in indexes]
+    mfcc = computeFeaturesFromCombinations(combs, verbose=False)[1]
+    mfcc = np.array(mfcc).mean(axis=2)
+    distances = distance_matrix(x=mfcc, y=mfcc)
+    aux_distance = distances + 1e9 * np.eye(nbcombs)
+    return aux_distance
+
 if __name__ == "__main__":
 
-    folder_name = 'renamed'
-    audio_folder = f"/home/jimena/work/dev/ARTEX/{folder_name}"
-    output_folder = "audio/features"
-    os.makedirs(output_folder, exist_ok=True)
+    ap = ArgumentParser()
+    ap.add_argument('--audio_folder', type=str, default=DEFAULTAUDIOFOLDER)
+    ap.add_argument('--nbcombs', type=int, default=DEFAULTNBFINALCOMBS)
+    ap.add_argument('--nbsteps', type=int, default=DEFAULTMAXNBSTEPS)
+    ap.add_argument('--resultsfolder', type=str, default=DEFAULTRESULTSFOLDER)
+    ap.add_argument('--seed', type=int, default=DEFAULTSEED)
 
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(
-      filename=os.path.join(output_folder, 'log.log'),
-      filemode='w',
-      level=logging.INFO)
+    args = ap.parse_args()
+    audio_folder = args.audio_folder
+    nbcombs = args.nbcombs
+    nbsteps = args.nbsteps
+    resultsfolder = args.resultsfolder
+    seed = args.seed
 
+    np.random.seed(seed)
     print(f"Extracting audio features from samples in {audio_folder}")
 
     samples = glob(os.path.join(audio_folder, '*.wav'))
     nb_samples = len(samples)
     print(f"Found {nb_samples} samples at {audio_folder}")
-    # testDistenceMatrices(samples)
 
     flutes = {f"flute {k}": [] for k in range(6)}
     for sample in samples:
@@ -151,28 +163,12 @@ if __name__ == "__main__":
 
     combinations = [_ for _ in itertools.product(*['0123456789',]*6)]
 
-    ###############
-    # for dev
-    # combinations = combinations[:1000]
-    ###############
-
     nb_combs = len(combinations)
     print(f"There are {nb_combs} combinations possible")
 
-    # test_mel, test_mfcc = computeFeaturesFromCombinations(combinations[:10])
-
-
-    def getAuxDistanceMatrix(indexes):
-        combs = [combinations[idx] for idx in indexes]
-        mfcc = computeFeaturesFromCombinations(combs, verbose=False)[1]
-        mfcc = np.array(mfcc).mean(axis=2)
-        distances = distance_matrix(x=mfcc, y=mfcc)
-        aux_distance = distances + 1e9 * np.eye(NBFINALCOMBS)
-        return aux_distance
-
     print(f"------------------------- STEP -1")
-    indexes = np.random.choice(nb_combs, size=NBFINALCOMBS, replace=False)
-    aux_distance = getAuxDistanceMatrix(indexes)
+    indexes = np.random.choice(nb_combs, size=nbcombs, replace=False)
+    aux_distance = getAuxDistanceMatrix(indexes, nbcombs)
     min_combs_dict = aux_distance.min()
     print(f"Current indexes are {indexes}")
     print(f"Current samples are {[combinations[idx] for idx in indexes]}")
@@ -183,14 +179,14 @@ if __name__ == "__main__":
         eject = int(eject_a)
     else:
         eject = int(eject_b)
-    print(f"Ejecting candaidate is located at index {eject}")
+    print(f"Ejecting candidate is located at index {eject}")
 
     new_cadidate = np.random.choice(nb_combs, size=1, replace=False)
     print(f"New candidate is {new_cadidate}")
 
     new_indexes = deepcopy(indexes)
     new_indexes[eject] = new_cadidate
-    new_aux_distance = getAuxDistanceMatrix(new_indexes)
+    new_aux_distance = getAuxDistanceMatrix(new_indexes, nbcombs)
     new_min_combs_dict = new_aux_distance.min()
     print(f"New indexes are {new_indexes}")
     print(f"New normalized min distance is {new_min_combs_dict}")
@@ -199,9 +195,9 @@ if __name__ == "__main__":
         indexes = new_indexes
         print(f"Updating indexes to new ones")
 
-    for _ in range(MAXNBSTEPS):
+    for _ in range(nbsteps):
         print(f"------------------------- STEP {_}")
-        aux_distance = getAuxDistanceMatrix(indexes)
+        aux_distance = getAuxDistanceMatrix(indexes, nbcombs)
         min_combs_dict = aux_distance.min()
         # print(f"Current indexes are {indexes}")
         # print(f"Current min distance is {min_combs_dict}")
@@ -211,14 +207,14 @@ if __name__ == "__main__":
             eject = int(eject_a)
         else:
             eject = int(eject_b)
-        # print(f"Ejecting candaidate is located at index {eject}")
+        # print(f"Ejecting candidate is located at index {eject}")
 
         new_cadidate = np.random.choice(nb_combs, size=1, replace=False)
         # print(f"New candidate is {new_cadidate}")
 
         new_indexes = deepcopy(indexes)
         new_indexes[eject] = new_cadidate
-        new_aux_distance = getAuxDistanceMatrix(new_indexes)
+        new_aux_distance = getAuxDistanceMatrix(new_indexes, nbcombs)
         new_min_combs_dict = new_aux_distance.min()
         # print(f"New indexes are {new_indexes}")
         # print(f"New min distance is {new_min_combs_dict}")
@@ -231,16 +227,33 @@ if __name__ == "__main__":
     final_combinations = [combinations[i] for i in indexes]
     print(f"Final indexes are: {indexes}")
     print(f"Final combinations are: {final_combinations}")
-    final_mfcc = computeFeaturesFromCombinations(final_combinations, verbose=False)[1]
 
-    fig, axes = plt.subplots(nrows=NBFINALCOMBS, sharex=True)
+    # save results
+    name = f"final_mfcc_NBFINALCOMBS_{nbcombs}_MAXNBSTEPS_{nbsteps}_SEED_{seed}"
+    resfile = os.path.join(resultsfolder,f"{name}.txt")
+    with open(resfile, 'w') as f:
+        f.writelines('\n'.join([','.join(c) for c in final_combinations])+'\n')
+    print(f"Final combinations saved at {resfile}")
+
+    # show results
+    final_mel, final_mfcc = computeFeaturesFromCombinations(final_combinations, verbose=False)
+
+    fig, axes = plt.subplots(nrows=nbcombs, sharex=True)
     for ax, mfccs, comb in zip(axes, final_mfcc, final_combinations):
         img = librosa.display.specshow(mfccs, x_axis='time', ax=ax)
         fig.colorbar(img, ax=[ax])
         ax.set(title=f'Final MFCC tuples {''.join(comb)}')
+
+    fig, axes = plt.subplots(nrows=nbcombs, sharex=True)
+    for ax, mel, comb in zip(axes, final_mel, final_combinations):
+        img = librosa.display.specshow(
+            librosa.power_to_db(mel, ref=np.max),
+            x_axis='time', y_axis='mel', fmax=8000, ax=ax)
+        fig.colorbar(img, ax=[ax])
+        ax.set(title=f'Final MEL tuples {''.join(comb)}')
+
     plt.show()
-    fig.savefig(f"final_mfcc_NBFINALCOMBS_{NBFINALCOMBS}_MAXNBSTEPS_{MAXNBSTEPS}_SEED_{SEED}.png")
 
+    imgfile = os.path.join(resultsfolder,f"{name}.png")
+    fig.savefig(imgfile)
 
-    with open(f"final_mfcc_NBFINALCOMBS_{NBFINALCOMBS}_MAXNBSTEPS_{MAXNBSTEPS}_SEED_{SEED}.txt", 'w') as f:
-        f.writelines('\n'.join([','.join(c) for c in final_combinations])+'\n')
