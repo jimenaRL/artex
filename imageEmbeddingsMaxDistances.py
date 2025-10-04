@@ -24,6 +24,7 @@ DEFAULTSEED = 1334
 
 DEFAULTRESULTSFOLDER = "/home/jimena/work/dev/ARTEX/results/ForLearning_2025-10-03_19-47-53"
 DEFAULTIMAGEFOLDER = "/home/jimena/work/dev/ARTEX/ForLearning_2025-10-03_19-47-53/images"
+DEFAULTPARAMSPATH = "/home/jimena/work/dev/ARTEX/ForLearning_2025-10-03_19-47-53.json"
 
 
 # https://github.com/facebookresearch/dino
@@ -143,6 +144,7 @@ if __name__ == "__main__":
 
     ap = ArgumentParser()
     ap.add_argument('--image_folder', type=str, default=DEFAULTIMAGEFOLDER)
+    ap.add_argument('--params', type=str, default=DEFAULTPARAMSPATH)
     ap.add_argument('--repository', type=str, default=DEFAULTREPO)
     ap.add_argument('--model', type=str, default=DEFAULTMODEL)
     ap.add_argument('--finalnbimages', type=int, default=DEFAULTNBFINALIMAGES)
@@ -152,6 +154,7 @@ if __name__ == "__main__":
 
     args = ap.parse_args()
     image_folder = args.image_folder
+    params = args.params
     repository = args.repository
     model = args.model
     finalnbimages = args.finalnbimages
@@ -165,6 +168,9 @@ if __name__ == "__main__":
     print("\n\n---------------------------------------------------------")
     print(f"PARAMETERS:\n{dumped_parameters[2:-2]}")
     print("---------------------------------------------------------")
+
+    with open(params, 'r') as f:
+        params = json.load(f)
 
     np.random.seed(seed)
     print(f"Computing embeddings from images in {image_folder} using {model}.")
@@ -221,5 +227,12 @@ if __name__ == "__main__":
     os.makedirs(selected_images_folder, exist_ok=True)
     for i in indexes:
         os.system(f"cp {allimages[i]} {selected_images_folder}/")
+
+    iFrames = [params['frames'][i]['iFrame'] for i in indexes]
+    name = f"selected_iFrames_NBIMAGES_{finalnbimages}_MAXNBSTEPS_{nbsteps}_SEED_{seed}"
+    resfile = os.path.join(resultsfolder,f"{name}.txt")
+    with open(resfile, 'w') as f:
+        f.writelines('\n'.join(map(str, iFrames))+'\n')
+    print(f"Final iFrames saved at {resfile}:\niFrames")
 
     os.system(f"open {selected_images_folder}/")
