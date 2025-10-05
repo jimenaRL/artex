@@ -49,24 +49,27 @@ def compute_features(model, path):
 
     return get_features(resnet50, Image.open(path)).detach().numpy()
 
-def allImagesDistanceMatrix(embeddings, name):
-    distances = distance_matrix(x=embeddings, y=embeddings)
-    print(f"distance:\n{distances}")
+def imagesDistanceMatrix(embeddings, folder, name):
 
-    npfile = f"{name}.npy"
+    os.makedirs(folder, exist_ok=True)
+
+    distances = distance_matrix(x=embeddings, y=embeddings)
+    # print(f"distance:\n{distances}")
+
+    npfile = os.path.join(folder, f"{name}.npy")
     with open(npfile, 'wb') as f:
         np.save(f, distances)
     print(f"Distance matrix array saved at: {npfile}")
 
-    csvfile = f"{name}.csv"
-    pd.DataFrame(distances).to_csv(csvfile)
+    csvfile = os.path.join(folder, f"{name}.csv")
+    pd.DataFrame(distances).to_csv(csvfile, index=False)
     print(f"Distance matrix csv saved at: {csvfile}")
 
     fig, ax = plt.subplots(figsize=(10,10))
-    annot = True if nb_images <= 10 else False
+    annot = True if len(embeddings) <= 10 else False
     heatmap = sns.heatmap(distances, annot=annot, cmap='YlGnBu', linewidths=0.001, ax=ax)
 
-    imgfile = f"{name}.png"
+    imgfile = os.path.join(folder, f"{name}.png")
     heatmap.get_figure().savefig(imgfile)
     print(f"Distance matrix image saved at: {imgfile}")
 
@@ -178,7 +181,7 @@ if __name__ == "__main__":
     allimages = glob(os.path.join(image_folder, '*.png'))
     allimages.sort()
 
-    embfile = os.path.join(resultsfolder, f"frame_embeddings.npy")
+    embfile = os.path.join(resultsfolder, f"embeddings.npy")
     filesname = os.path.join(resultsfolder, f"emb_distance_matrix")
     disfile = f"{filesname}.npy"
     if os.path.exists(embfile):
@@ -205,8 +208,7 @@ if __name__ == "__main__":
 
         with open(embfile, 'wb') as f:
             np.save(f, allembeddings)
-        imgfile = os.path.join(resultsfolder, f"{video}_emb_distance_matrix.png")
-        alldistances = allImagesDistanceMatrix(allembeddings, filesname)
+        alldistances = imagesDistanceMatrix(allembeddings, resultsfolder, f"{video}_emb_distance_matrix")
 
         plt.hist(alldistances.flatten(), bins='auto')
         plt.title("Distances histogram")
@@ -219,20 +221,37 @@ if __name__ == "__main__":
     indexes = pairsFind(alldistances, allembeddings, finalnbimages)
     print("---------------------------------------------------------")
 
-    for i in indexes:
-        print(allimages[i])
+    # get images, embeddings and iFrames from indexes
+    selected_images = [allimages[i] for i in indexes]
+    selected_embeddings = allembeddings[indexes]
+    selected_iFrames = [params['frames'][i]['iFrame'] for i in indexes]
 
-    name = f"selected_images_NBIMAGES_{finalnbimages}_MAXNBSTEPS_{nbsteps}_SEED_{seed}"
-    selected_images_folder = os.path.join(resultsfolder, name)
+    # reorder selected images
+    name = f"selected_embeddings_distance_matrix"
+    selected_results_folder = os.path.join(resultsfolder, f"NBIMAGES_{finalnbimages}_SEED_{seed}")
+    distances = imagesDistanceMatrix(selected_embeddings, selected_results_folder, name)
+    aux_distances = distances + 1e9 * np.eye(finalnbimages)
+    min_distance = aux_distances.min(axis=0)
+    ordered_indexes = np.flip(np.argsort(min_distance))
+
+    ordered_selected_images = [selected_images[i] for i in ordered_indexes]
+    ordered_selected_iFrames = [selected_iFrames[i] for i in ordered_indexes]
+
+    print(f"Final ordered indexes are: {ordered_indexes}")
+
+    # save results
+    name = f"selected_images"
+    selected_images_folder = os.path.join(selected_results_folder, name)
     os.makedirs(selected_images_folder, exist_ok=True)
-    for i in indexes:
-        os.system(f"cp {allimages[i]} {selected_images_folder}/")
+    for n, (iFrame, image) in enumerate(zip(ordered_selected_iFrames, ordered_selected_images)):
+        newimgfile = f"image_nb_{n}_iFrame_{iFrame}_frame_{os.path.split(image)[1][:-4]}.png"
+        os.system(f"cp {image} {selected_images_folder}/{newimgfile}")
 
-    iFrames = [params['frames'][i]['iFrame'] for i in indexes]
-    name = f"selected_iFrames_NBIMAGES_{finalnbimages}_MAXNBSTEPS_{nbsteps}_SEED_{seed}"
-    resfile = os.path.join(resultsfolder,f"{name}.txt")
+
+    name = f"selected_iFrames_NBIMAGES_{finalnbimages}_SEED_{seed}"
+    resfile = os.path.join(selected_results_folder,f"{name}.txt")
     with open(resfile, 'w') as f:
-        f.writelines('\n'.join(map(str, iFrames))+'\n')
+        f.writelines('\n'.join(map(str, ordered_selected_iFrames))+'\n')
     print(f"Final iFrames saved at {resfile}:\niFrames")
 
     os.system(f"open {selected_images_folder}/")
