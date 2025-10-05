@@ -1,4 +1,5 @@
 import os
+import json
 import time
 import logging
 import itertools
@@ -10,6 +11,7 @@ from copy import deepcopy
 from argparse import ArgumentParser
 
 import librosa
+import soundfile as sf
 import numpy as np
 from scipy.spatial import distance_matrix
 
@@ -20,10 +22,10 @@ import ipdb
 import warnings
 warnings.filterwarnings('ignore')
 
-DEFAULTNBFINALCOMBS = 60
+DEFAULTNBFINALCOMBS = 10
 DEFAULTMAXNBSTEPS = 500
 DEFAULTAUDIOFOLDER = f"/home/jimena/work/dev/ARTEX/renamed"
-DEFAULTRESULTSFOLDER = f"/home/jimena/work/dev/ARTEX/results"
+DEFAULTRESULTSFOLDER = f"/home/jimena/work/dev/ARTEX/results/flutes"
 
 DEFAULTSEED = 1334
 
@@ -31,6 +33,23 @@ SAMPLINGRATE = 44100
 
 # from joblib import delayed, Parallel
 # from joblib import dump, load
+
+
+dictParms = {
+    '0': '0.05 0',
+    '1': '0.05 0.25',
+    '2': '0.05 0.5',
+    '3': '0.05 0.75',
+    '4': '0.05 0.99',
+    '5': '0.1 0.99',
+    '6': '0.1 0.75',
+    '7': '0.1 0.5',
+    '8': '0.1 0.25',
+    '9': '0.1 0',
+}
+
+def combinationsToParams(combination):
+    return ' '.join([dictParms[c] for c in combination])
 
 def compute_mfcc(y, sr):
     S = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
@@ -64,7 +83,7 @@ def loadAndMiddleCrop(path, seconds=1):
     y = y[init:end]
     return y[:seconds*sr]
 
-def getMeanAudio(comb):
+def getMeanAudio(comb, savepath=None):
     y0 = loadAndMiddleCrop(flutes["flute 0"][int(comb[0])])
     y1 = loadAndMiddleCrop(flutes["flute 1"][int(comb[1])])
     y2 = loadAndMiddleCrop(flutes["flute 2"][int(comb[2])])
@@ -72,6 +91,8 @@ def getMeanAudio(comb):
     y4 = loadAndMiddleCrop(flutes["flute 4"][int(comb[4])])
     y5 = loadAndMiddleCrop(flutes["flute 5"][int(comb[5])])
     y = np.mean([y0, y1, y2, y3, y4, y5], axis=0)
+    if savepath:
+        sf.write(savepath, y, SAMPLINGRATE, 'PCM_24')
     return y
 
 def getMeanDescriptors(comb):
@@ -144,6 +165,12 @@ if __name__ == "__main__":
     resultsfolder = args.resultsfolder
     seed = args.seed
 
+    parameters = vars(args)
+    dumped_parameters = json.dumps(parameters, sort_keys=True, indent=4)
+    print("\n\n---------------------------------------------------------")
+    print(f"PARAMETERS:\n{dumped_parameters[2:-2]}")
+    print("---------------------------------------------------------\n")
+
     np.random.seed(seed)
     print(f"Extracting audio features from samples in {audio_folder}")
 
@@ -166,12 +193,13 @@ if __name__ == "__main__":
     nb_combs = len(combinations)
     print(f"There are {nb_combs} combinations possible")
 
+
     print(f"------------------------- STEP -1")
     indexes = np.random.choice(nb_combs, size=nbcombs, replace=False)
     aux_distance = getAuxDistanceMatrix(indexes, nbcombs)
     min_combs_dict = aux_distance.min()
     print(f"Current indexes are {indexes}")
-    print(f"Current samples are {[combinations[idx] for idx in indexes]}")
+    # print(f"Current samples are {[combinations[idx] for idx in indexes]}")
     print(f"Current min distance is {min_combs_dict}")
 
     eject_a, eject_b = np.unravel_index(aux_distance.argmin(), aux_distance.shape)
@@ -223,37 +251,56 @@ if __name__ == "__main__":
             indexes = new_indexes
             print(f"Updating indexes to new ones. New min distance is {new_min_combs_dict}")
 
-
-    final_combinations = [combinations[i] for i in indexes]
     print(f"Final indexes are: {indexes}")
+    final_combinations = [combinations[i] for i in indexes]
     print(f"Final combinations are: {final_combinations}")
 
+    # reorder selected combinations
+    aux_distance = getAuxDistanceMatrix(indexes, nbcombs)
+    min_distance = aux_distance.min(axis=0)
+    ordered_indexes = np.flip(np.argsort(min_distance))
+    print(f"Final ordered indexes are: {ordered_indexes}")
+
+    ordered_final_combinations = [final_combinations[i] for i in ordered_indexes]
+    print(f"Ordered final combinations are: {ordered_final_combinations}")
+
     # save results
-    name = f"final_mfcc_NBFINALCOMBS_{nbcombs}_MAXNBSTEPS_{nbsteps}_SEED_{seed}"
-    resfile = os.path.join(resultsfolder,f"{name}.txt")
+    folder = os.path.join(resultsfolder, f"NBFINALCOMBS_{nbcombs}_SEED_{seed}")
+    os.makedirs(folder, exist_ok=True)
+    resfile = os.path.join(folder, f"ordered_final_combinations.txt")
     with open(resfile, 'w') as f:
-        f.writelines('\n'.join([','.join(c) for c in final_combinations])+'\n')
+        f.writelines('\n'.join([','.join(c) for c in ordered_final_combinations])+'\n')
     print(f"Final combinations saved at {resfile}")
 
-    # show results
-    final_mel, final_mfcc = computeFeaturesFromCombinations(final_combinations, verbose=False)
+    params = [combinationsToParams(c) for c in ordered_final_combinations]
+    paramsfile = os.path.join(folder, f"ordered_final_parameters.txt")
+    with open(paramsfile, 'w') as f:
+        f.writelines('\n'.join(params)+'\n')
+    print(f"Final parameters saved at {paramsfile}")
 
-    fig, axes = plt.subplots(nrows=nbcombs, sharex=True)
-    for ax, mfccs, comb in zip(axes, final_mfcc, final_combinations):
+    selected_sound_folder = os.path.join(folder, 'selected_sound')
+    os.makedirs(selected_sound_folder, exist_ok=True)
+    for n, comb in enumerate(ordered_final_combinations):
+        soundfile = os.path.join(selected_sound_folder, f"selected_sound_nb_{n}_combination_{''.join(comb)}.wav")
+        getMeanAudio(comb, savepath=soundfile)
+
+    # show results
+    final_mel, final_mfcc = computeFeaturesFromCombinations(ordered_final_combinations, verbose=False)
+
+    fig, axes = plt.subplots(ncols=nbcombs, sharex=True)
+    for ax, mfccs, comb in zip(axes, final_mfcc, ordered_final_combinations):
         img = librosa.display.specshow(mfccs, x_axis='time', ax=ax)
         fig.colorbar(img, ax=[ax])
-        ax.set(title=f'Final MFCC tuples {''.join(comb)}')
+        ax.set(title=''.join(comb))
 
-    fig, axes = plt.subplots(nrows=nbcombs, sharex=True)
-    for ax, mel, comb in zip(axes, final_mel, final_combinations):
+    fig, axes = plt.subplots(figsize=(16,16), ncols=nbcombs, sharex=True)
+    for ax, mel, comb in zip(axes, final_mel, ordered_final_combinations):
         img = librosa.display.specshow(
             librosa.power_to_db(mel, ref=np.max),
             x_axis='time', y_axis='mel', fmax=8000, ax=ax)
         fig.colorbar(img, ax=[ax])
-        ax.set(title=f'Final MEL tuples {''.join(comb)}')
+        ax.set(title=''.join(comb))
 
-    plt.show()
-
-    imgfile = os.path.join(resultsfolder,f"{name}.png")
+    imgfile = os.path.join(folder, f"ordered_final_combinations.png")
     fig.savefig(imgfile)
-
+    os.system(f"open {imgfile}")
